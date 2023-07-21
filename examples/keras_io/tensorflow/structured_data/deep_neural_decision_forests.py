@@ -1,7 +1,6 @@
 """
 Title: Classification with Neural Decision Forests
 Author: [Khalid Salama](https://www.linkedin.com/in/khalid-salama-24403144/)
-Converted to Keras-core: [Diksha Shrivastava](https://twitter.com/Diksha1713)
 Date created: 2021/01/15
 Last modified: 2021/01/15
 Description: How to train differentiable decision trees for end-to-end learning in deep neural networks.
@@ -33,6 +32,7 @@ and 9 categorical features.
 """
 ## Setup
 """
+
 import os
 
 os.environ["KERAS_BACKEND"] = "tensorflow"
@@ -145,7 +145,6 @@ TARGET_FEATURE_NAME = "income_bracket"
 # A list of the labels of the target features.
 TARGET_LABELS = [" <=50K", " >50K"]
 
-
 """
 ## Create `tf.data.Dataset` objects for training and validation
 
@@ -155,9 +154,7 @@ for training and validation. We also preprocess the input by mapping the target 
 to an index.
 """
 
-from keras_core.layers import StringLookup
-
-target_label_lookup = StringLookup(
+target_label_lookup = layers.StringLookup(
     vocabulary=TARGET_LABELS, mask_token=None, num_oov_indices=0
 )
 
@@ -209,7 +206,7 @@ def encode_inputs(inputs):
             # Create a lookup to convert a string values to an integer indices.
             # Since we are not using a mask token, nor expecting any out of vocabulary
             # (oov) token, we set mask_token to None and num_oov_indices to 0.
-            lookup = StringLookup(
+            lookup = layers.StringLookup(
                 vocabulary=vocabulary, mask_token=None, num_oov_indices=0
             )
             # Convert the string input values into integer indices.
@@ -252,9 +249,6 @@ leaves to produce the final `outputs`.
 """
 
 
-from keras_core import backend
-
-
 class NeuralDecisionTree(keras.Model):
     def __init__(self, depth, num_features, used_features_rate, num_classes):
         super().__init__()
@@ -270,8 +264,9 @@ class NeuralDecisionTree(keras.Model):
         )
         self.used_features_mask = one_hot[sampled_feature_indicies]
 
-        self.pi = backend.Variable(
-            initializer=keras.initializers.RandomNormal()(
+        # Initialize the weights of the classes in leaves.
+        self.pi = tf.Variable(
+            initial_value=tf.random_normal_initializer()(
                 shape=[self.num_leaves, self.num_classes]
             ),
             dtype="float32",
@@ -283,15 +278,15 @@ class NeuralDecisionTree(keras.Model):
             units=self.num_leaves, activation="sigmoid", name="decision"
         )
 
-    def __call__(self, features):
-        batch_size = ops.shape(features)[0]
+    def call(self, features):
+        batch_size = tf.shape(features)[0]
+
         # Apply the feature mask to the input features.
-        transpose_used_features_mask = ops.transpose(self.used_features_mask)
-        features = ops.matmul(
-            features, transpose_used_features_mask
+        features = tf.matmul(
+            features, self.used_features_mask, transpose_b=True
         )  # [batch_size, num_used_features]
         # Compute the routing probabilities.
-        decisions = ops.expand_dims(
+        decisions = tf.expand_dims(
             self.decision_fn(features), axis=2
         )  # [batch_size, num_leaves, 1]
         # Concatenate the routing probabilities with their complements.
@@ -299,16 +294,16 @@ class NeuralDecisionTree(keras.Model):
             [decisions, 1 - decisions], axis=2
         )  # [batch_size, num_leaves, 2]
 
-        mu = ops.ones([batch_size, 1, 1])
+        mu = tf.ones([batch_size, 1, 1])
 
         begin_idx = 1
         end_idx = 2
         # Traverse the tree in breadth-first order.
         for level in range(self.depth):
-            mu = ops.reshape(
+            mu = tf.reshape(
                 mu, [batch_size, -1, 1]
             )  # [batch_size, 2 ** level, 1]
-            mu = ops.tile(mu, (1, 1, 2))  # [batch_size, 2 ** level, 2]
+            mu = tf.tile(mu, (1, 1, 2))  # [batch_size, 2 ** level, 2]
             level_decisions = decisions[
                 :, begin_idx:end_idx, :
             ]  # [batch_size, 2 ** level, 2]
@@ -316,13 +311,13 @@ class NeuralDecisionTree(keras.Model):
             begin_idx = end_idx
             end_idx = begin_idx + 2 ** (level + 1)
 
-        mu = ops.reshape(
+        mu = tf.reshape(
             mu, [batch_size, self.num_leaves]
         )  # [batch_size, num_leaves]
         probabilities = keras.activations.softmax(
             self.pi
         )  # [num_leaves, num_classes]
-        outputs = ops.matmul(mu, probabilities)  # [batch_size, num_classes]
+        outputs = tf.matmul(mu, probabilities)  # [batch_size, num_classes]
         return outputs
 
 
@@ -351,8 +346,8 @@ class NeuralDecisionForest(keras.Model):
 
     def call(self, inputs):
         # Initialize the outputs: a [batch_size, num_classes] matrix of zeros.
-        batch_size = ops.shape(inputs)[0]
-        outputs = ops.zeros([batch_size, num_classes])
+        batch_size = tf.shape(inputs)[0]
+        outputs = tf.zeros([batch_size, num_classes])
 
         # Aggregate the outputs of trees in the ensemble.
         for tree in self.ensemble:
@@ -369,7 +364,6 @@ Finally, let's set up the code that will train and evaluate the model.
 learning_rate = 0.01
 batch_size = 265
 num_epochs = 10
-hidden_units = [64, 64]
 
 
 def run_experiment(model):
@@ -425,7 +419,6 @@ def create_tree_model():
 tree_model = create_tree_model()
 run_experiment(tree_model)
 
-
 """
 ## Experiment 2: train a forest model
 
@@ -434,7 +427,6 @@ where each tree uses randomly selected 50% of the input features. You can contro
 of features to be used in each tree by setting the `used_features_rate` variable.
 In addition, we set the depth to 5 instead of 10 compared to the previous experiment.
 """
-
 
 num_trees = 25
 depth = 5
@@ -457,8 +449,8 @@ def create_forest_model():
 
 
 forest_model = create_forest_model()
-run_experiment(forest_model)
 
+run_experiment(forest_model)
 
 """
 You can use the trained model hosted on [Hugging Face Hub](https://huggingface.co/keras-io/neural-decision-forest)
